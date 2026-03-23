@@ -1,0 +1,109 @@
+---
+# Tekton Tasks for CI/CD Final Project
+# These tasks consume a Kubernetes Secret that holds your GitHub PAT.
+# Create the secret first:
+#   oc create secret generic github-token \
+#     --from-literal=username=<your-github-username> \
+#     --from-literal=password=<your-github-pat> \
+#     --type=kubernetes.io/basic-auth
+#
+# Then annotate it so Tekton knows which host it applies to:
+#   oc annotate secret github-token \
+#     tekton.dev/git-0=https://github.com
+
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: git-clone-with-pat
+spec:
+  description: >
+    Clone a GitHub repository using credentials stored in a
+    Kubernetes Secret (username + PAT as password).
+  params:
+    - name: repo-url
+      type: string
+      description: Full HTTPS URL of the GitHub repository to clone.
+    - name: branch
+      type: string
+      default: main
+      description: Branch to clone.
+  workspaces:
+    - name: output
+      description: Workspace where the repository will be cloned.
+    - name: github-credentials
+      description: >
+        Secret workspace bound to the 'github-token' secret.
+        Must contain keys 'username' and 'password' (the PAT).
+  steps:
+    - name: clone
+      image: alpine/git:latest
+      script: |
+        #!/bin/sh
+        set -e
+        USERNAME=$(cat $(workspaces.github-credentials.path)/username)
+        TOKEN=$(cat $(workspaces.github-credentials.path)/password)
+        REPO_URL=$(params.repo-url)
+        # Embed credentials in the URL so git can authenticate
+        AUTH_URL=$(echo "$REPO_URL" | sed "s|https://|https://${USERNAME}:${TOKEN}@|")
+        git clone --branch $(params.branch) "$AUTH_URL" $(workspaces.output.path)
+        echo "Clone complete."
+
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: git-commit-and-push
+spec:
+  description: >
+    Commit any staged changes and push them back to GitHub using
+    credentials stored in a Kubernetes Secret.
+  params:
+    - name: repo-url
+      type: string
+      description: Full HTTPS URL of the target GitHub repository.
+    - name: branch
+      type: string
+      default: main
+      description: Remote branch to push to.
+    - name: commit-message
+      type: string
+      default: "chore: automated update from pipeline"
+      description: Commit message for the push.
+    - name: git-user-name
+      type: string
+      default: "CI Pipeline"
+      description: Git author name used for the commit.
+    - name: git-user-email
+      type: string
+      default: "ci@example.com"
+      description: Git author e-mail used for the commit.
+  workspaces:
+    - name: source
+      description: Workspace containing the repository to commit and push.
+    - name: github-credentials
+      description: >
+        Secret workspace bound to the 'github-token' secret.
+        Must contain keys 'username' and 'password' (the PAT).
+  steps:
+    - name: push
+      image: alpine/git:latest
+      script: |
+        #!/bin/sh
+        set -e
+        cd $(workspaces.source.path)
+        USERNAME=$(cat $(workspaces.github-credentials.path)/username)
+        TOKEN=$(cat $(workspaces.github-credentials.path)/password)
+        REPO_URL=$(params.repo-url)
+        AUTH_URL=$(echo "$REPO_URL" | sed "s|https://|https://${USERNAME}:${TOKEN}@|")
+        git config user.name "$(params.git-user-name)"
+        git config user.email "$(params.git-user-email)"
+        git remote set-url origin "$AUTH_URL"
+        # Stage all changes and commit only if there is something to commit
+        git add -A
+        if git diff --cached --quiet; then
+          echo "Nothing to commit."
+        else
+          git commit -m "$(params.commit-message)"
+          git push origin HEAD:$(params.branch)
+          echo "Push complete."
+        fi
