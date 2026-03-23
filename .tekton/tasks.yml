@@ -42,12 +42,12 @@ spec:
 
 ---
 apiVersion: tekton.dev/v1beta1
-kind: Taks
+kind: Task
 metadata:
   name: nose
 spec:
   workspaces:
-    - name: (workspaces.source.path
+    - name: source
   params:
     - name: args
       description: Arguments to pass to nose
