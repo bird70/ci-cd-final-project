@@ -33,6 +33,6 @@ Licensed under the Apache License. See [LICENSE](/LICENSE)
 
 ## Author
 
-Skills Network
+Skills Network (and me)
 
 ## <h3 align="center"> © IBM Corporation 2023. All rights reserved. <h3/>
